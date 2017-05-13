@@ -40,6 +40,8 @@ namespace SteamVR_WebKit
 
         bool _allowScrolling = true;
 
+        bool _autoKeyboard;
+
         public bool AllowScrolling
         {
             get { return _allowScrolling; } set { _allowScrolling = value; }
@@ -119,7 +121,7 @@ namespace SteamVR_WebKit
 
         }
 
-        public WebKitOverlay(Uri uri, int windowWidth, int windowHeight, string overlayKey, string overlayName, OverlayType overlayType)
+        public WebKitOverlay(Uri uri, int windowWidth, int windowHeight, string overlayKey, string overlayName, OverlayType overlayType, bool autoKeyboard = true)
         {
             if (!SteamVR_WebKit.Initialised)
                 SteamVR_WebKit.Init();
@@ -131,6 +133,7 @@ namespace SteamVR_WebKit
             _windowHeight = windowHeight;
             _overlayKey = overlayKey;
             _overlayName = overlayName;
+            _autoKeyboard = autoKeyboard;
 
             if (overlayType == OverlayType.Dashboard)
                 CreateDashboardOverlay();
@@ -215,12 +218,43 @@ namespace SteamVR_WebKit
                         }
                     };
                 }
+                if (_autoKeyboard)
+                {
+                    // register handler for keyboard showing
+                    EventHandler<LoadingStateChangedEventArgs> handler = _browserPageLoaded;
+                    _browser.LoadingStateChanged += handler;
+                }
 
                 await LoadPageAsync(_browser);
             }
 
             //If while we waited any JS commands were queued, then run those now
             ExecQueuedJS();
+        }
+
+        private void _browserPageLoaded(object sender, LoadingStateChangedEventArgs args)
+        {
+            _addInputClickListeners();
+        }
+
+        private void _addInputClickListeners()
+        {
+            ExecAsyncJS(
+                @"var inputs = document.getElementsByTagName('input');
+
+                  for (var i = 0; i < inputs.length; i++) {
+                    if (inputs[i].type.toLowerCase() == 'text') {
+                        inputs[i].addEventListener('click', function() {
+                            alert('clicked input');
+                        });
+                    }
+                  }"
+            );
+        }
+
+        private void _showKeyboard()
+        {
+
         }
 
         private void _browser_BrowserInitialized(object sender, EventArgs e)
@@ -329,6 +363,11 @@ namespace SteamVR_WebKit
                 case EVREventType.VREvent_Scroll:
                     if(_allowScrolling)
                         HandleMouseScrollEvent(ovrEvent);
+                    break;
+                case EVREventType.VREvent_KeyboardDone:
+                    StringBuilder buffer = new StringBuilder(1024);
+                    SteamVR.instance.overlay.GetKeyboardText(buffer, 1024);
+                    // somehow relay text to input field. maybe with callback/signal?
                     break;
             }
         }
