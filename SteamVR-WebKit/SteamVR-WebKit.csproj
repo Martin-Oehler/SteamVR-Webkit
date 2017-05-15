@@ -74,6 +74,7 @@
   <ItemGroup>
     <Compile Include="AttachmentType.cs" />
     <Compile Include="JsInterop\Applications.cs" />
+    <Compile Include="JsInterop\Keyboard.cs" />
     <Compile Include="JsInterop\Notifications.cs" />
     <Compile Include="openvr_api.cs" />
     <Compile Include="Overlay.cs" />

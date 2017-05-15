@@ -10,6 +10,7 @@ using Valve.VR;
 using System.Drawing;
 using System.Drawing.Imaging;
 using CefSharp.Internals;
+using SteamVR_WebKit.JsInterop;
 
 namespace SteamVR_WebKit
 {
@@ -202,6 +203,10 @@ namespace SteamVR_WebKit
             using (RequestContext context = new RequestContext(reqSettings))
             {
                 _browser = new ChromiumWebBrowser(Uri.ToString(), _browserSettings, context);
+                if (_autoKeyboard)
+                {
+                    _browser.RegisterJsObject("keyboard", new Keyboard(DashboardOverlay));
+                }
                 BrowserPreInit?.Invoke(_browser, new EventArgs());
                 _browser.Size = new Size((int)_windowWidth, (int)_windowHeight);
                 _browser.NewScreenshot += Browser_NewScreenshot;
@@ -240,21 +245,22 @@ namespace SteamVR_WebKit
         private void _addInputClickListeners()
         {
             ExecAsyncJS(
-                @"var inputs = document.getElementsByTagName('input');
-
+                @"
+                  var inputs = document.getElementsByTagName('input');
                   for (var i = 0; i < inputs.length; i++) {
                     if (inputs[i].type.toLowerCase() == 'text') {
                         inputs[i].addEventListener('click', function() {
-                            alert('clicked input');
+                            var current_inputs = document.getElementsByClassName('current-keyboard-input');
+                            for (var i = 0; i < current_inputs.length; i++) {
+                                current_inputs[i].classList.remove('current-keyboard-input');
+                            }
+        
+                            this.classList.add('current-keyboard-input');
+                            keyboard.showKeyboard(this.value);
                         });
                     }
                   }"
             );
-        }
-
-        private void _showKeyboard()
-        {
-
         }
 
         private void _browser_BrowserInitialized(object sender, EventArgs e)
@@ -366,8 +372,18 @@ namespace SteamVR_WebKit
                     break;
                 case EVREventType.VREvent_KeyboardDone:
                     StringBuilder buffer = new StringBuilder(1024);
-                    SteamVR.instance.overlay.GetKeyboardText(buffer, 1024);
-                    // somehow relay text to input field. maybe with callback/signal?
+                    OpenVR.Overlay.GetKeyboardText(buffer, 1024);
+                    //SteamVR.instance.overlay.GetKeyboardText(buffer, 1024);
+                    Console.WriteLine("buffer: " + buffer.ToString());
+                    string script = @"var current_inputs = document.getElementsByClassName('current-keyboard-input');
+                          if (current_inputs[0]) {
+                            current_inputs[0].value = '" + buffer.ToString() + @"'
+                            current_inputs[0].classList.remove('current-keyboard-input');
+                          }
+                         ";
+                    Console.WriteLine(script);
+                    ExecAsyncJS(script);
+                    Console.WriteLine("finished");
                     break;
             }
         }
