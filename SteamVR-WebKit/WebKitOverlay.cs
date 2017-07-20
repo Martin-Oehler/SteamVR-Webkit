@@ -240,6 +240,19 @@ namespace SteamVR_WebKit
         private void _browserPageLoaded(object sender, LoadingStateChangedEventArgs args)
         {
             _addInputClickListeners();
+            //_checkActiveSelection();
+        }
+
+        private void _checkActiveSelection()
+        {
+            ExecAsyncJS(
+                @"
+                  var active = document.activeElement;
+                  if (active.tagName == 'INPUT') {
+                    active.classList.add('current-keyboard-input');
+                    keyboard.showKeyboard(active.value);
+                  }"
+            );
         }
 
         private void _addInputClickListeners()
@@ -378,6 +391,11 @@ namespace SteamVR_WebKit
                     string script = @"var current_inputs = document.getElementsByClassName('current-keyboard-input');
                           if (current_inputs[0]) {
                             current_inputs[0].value = '" + buffer.ToString() + @"'
+                            var event = new Event('input', {
+                                'bubbles': true,
+                                'cancelable': true
+                            });
+                            current_inputs[0].dispatchEvent(event);
                             current_inputs[0].classList.remove('current-keyboard-input');
                           }
                          ";
