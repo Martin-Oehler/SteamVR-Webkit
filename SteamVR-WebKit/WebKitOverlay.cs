@@ -10,6 +10,8 @@ using Valve.VR;
 using System.Drawing;
 using System.Drawing.Imaging;
 using CefSharp.Internals;
+using SteamVR_WebKit.JsInterop;
+using System.IO;
 
 namespace SteamVR_WebKit
 {
@@ -39,6 +41,9 @@ namespace SteamVR_WebKit
         string _overlayName;
 
         bool _allowScrolling = true;
+
+        bool _autoKeyboard;
+        string _autoKeyboardJS;
 
         public bool AllowScrolling
         {
@@ -119,7 +124,7 @@ namespace SteamVR_WebKit
 
         }
 
-        public WebKitOverlay(Uri uri, int windowWidth, int windowHeight, string overlayKey, string overlayName, OverlayType overlayType)
+        public WebKitOverlay(Uri uri, int windowWidth, int windowHeight, string overlayKey, string overlayName, OverlayType overlayType, bool autoKeyboard = true)
         {
             if (!SteamVR_WebKit.Initialised)
                 SteamVR_WebKit.Init();
@@ -131,6 +136,7 @@ namespace SteamVR_WebKit
             _windowHeight = windowHeight;
             _overlayKey = overlayKey;
             _overlayName = overlayName;
+            _autoKeyboard = autoKeyboard;
 
             if (overlayType == OverlayType.Dashboard)
                 CreateDashboardOverlay();
@@ -199,6 +205,11 @@ namespace SteamVR_WebKit
             using (RequestContext context = new RequestContext(reqSettings))
             {
                 _browser = new ChromiumWebBrowser(Uri.ToString(), _browserSettings, context);
+                if (_autoKeyboard)
+                {
+                    _browser.RegisterJsObject("keyboard", new Keyboard(DashboardOverlay));
+                    _autoKeyboardJS = File.ReadAllText("Resources/keyboard.js");
+                }
                 BrowserPreInit?.Invoke(_browser, new EventArgs());
                 _browser.Size = new Size((int)_windowWidth, (int)_windowHeight);
                 _browser.NewScreenshot += Browser_NewScreenshot;
@@ -215,12 +226,33 @@ namespace SteamVR_WebKit
                         }
                     };
                 }
+                // register handler for keyboard showing
+                EventHandler<LoadingStateChangedEventArgs> handler = _browserPageLoaded;
+                _browser.LoadingStateChanged += handler;
 
                 await LoadPageAsync(_browser);
             }
 
             //If while we waited any JS commands were queued, then run those now
             ExecQueuedJS();
+        }
+
+        private void _browserPageLoaded(object sender, LoadingStateChangedEventArgs args)
+        {
+            if (_autoKeyboard)
+            {
+                ExecAsyncJS(_autoKeyboardJS);
+                _autoKeyboardInjection();
+            }
+
+        }
+
+        private void _autoKeyboardInjection()
+        {
+            ExecAsyncJS("addInputListeners()");
+            // Works, but makes keyboards reappear in some cases
+            // ExecAsyncJS("checkActiveInput()");
+
         }
 
         private void _browser_BrowserInitialized(object sender, EventArgs e)
@@ -330,8 +362,13 @@ namespace SteamVR_WebKit
                     if(_allowScrolling)
                         HandleMouseScrollEvent(ovrEvent);
                     break;
+                case EVREventType.VREvent_KeyboardDone:
+                    HandleKeyboardDoneEvent(ovrEvent);
+                    break;
             }
         }
+
+
 
         MouseButtonType GetMouseButtonType(uint button)
         {
@@ -347,6 +384,13 @@ namespace SteamVR_WebKit
                     return MouseButtonType.Middle;
             }
             return MouseButtonType.Left;
+        }
+
+        void HandleKeyboardDoneEvent(VREvent_t ev)
+        {
+            StringBuilder buffer = new StringBuilder(1024);
+            OpenVR.Overlay.GetKeyboardText(buffer, 1024);
+            ExecAsyncJS("handleInputClicked('" + buffer.ToString() + "');");
         }
 
         void HandleMouseMoveEvent(VREvent_t ev)
