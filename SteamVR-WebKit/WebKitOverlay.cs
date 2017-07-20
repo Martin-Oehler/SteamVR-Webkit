@@ -11,6 +11,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using CefSharp.Internals;
 using SteamVR_WebKit.JsInterop;
+using System.IO;
 
 namespace SteamVR_WebKit
 {
@@ -42,6 +43,7 @@ namespace SteamVR_WebKit
         bool _allowScrolling = true;
 
         bool _autoKeyboard;
+        string _autoKeyboardJS;
 
         public bool AllowScrolling
         {
@@ -206,6 +208,7 @@ namespace SteamVR_WebKit
                 if (_autoKeyboard)
                 {
                     _browser.RegisterJsObject("keyboard", new Keyboard(DashboardOverlay));
+                    _autoKeyboardJS = File.ReadAllText("Resources/keyboard.js");
                 }
                 BrowserPreInit?.Invoke(_browser, new EventArgs());
                 _browser.Size = new Size((int)_windowWidth, (int)_windowHeight);
@@ -223,12 +226,9 @@ namespace SteamVR_WebKit
                         }
                     };
                 }
-                if (_autoKeyboard)
-                {
-                    // register handler for keyboard showing
-                    EventHandler<LoadingStateChangedEventArgs> handler = _browserPageLoaded;
-                    _browser.LoadingStateChanged += handler;
-                }
+                // register handler for keyboard showing
+                EventHandler<LoadingStateChangedEventArgs> handler = _browserPageLoaded;
+                _browser.LoadingStateChanged += handler;
 
                 await LoadPageAsync(_browser);
             }
@@ -239,41 +239,20 @@ namespace SteamVR_WebKit
 
         private void _browserPageLoaded(object sender, LoadingStateChangedEventArgs args)
         {
-            _addInputClickListeners();
-            //_checkActiveSelection();
+            if (_autoKeyboard)
+            {
+                ExecAsyncJS(_autoKeyboardJS);
+                _autoKeyboardInjection();
+            }
+
         }
 
-        private void _checkActiveSelection()
+        private void _autoKeyboardInjection()
         {
-            ExecAsyncJS(
-                @"
-                  var active = document.activeElement;
-                  if (active.tagName == 'INPUT') {
-                    active.classList.add('current-keyboard-input');
-                    keyboard.showKeyboard(active.value);
-                  }"
-            );
-        }
+            ExecAsyncJS("addInputListeners()");
+            // Works, but makes keyboards reappear in some cases
+            // ExecAsyncJS("checkActiveInput()");
 
-        private void _addInputClickListeners()
-        {
-            ExecAsyncJS(
-                @"
-                  var inputs = document.getElementsByTagName('input');
-                  for (var i = 0; i < inputs.length; i++) {
-                    if (inputs[i].type.toLowerCase() == 'text') {
-                        inputs[i].addEventListener('click', function() {
-                            var current_inputs = document.getElementsByClassName('current-keyboard-input');
-                            for (var i = 0; i < current_inputs.length; i++) {
-                                current_inputs[i].classList.remove('current-keyboard-input');
-                            }
-        
-                            this.classList.add('current-keyboard-input');
-                            keyboard.showKeyboard(this.value);
-                        });
-                    }
-                  }"
-            );
         }
 
         private void _browser_BrowserInitialized(object sender, EventArgs e)
@@ -384,27 +363,12 @@ namespace SteamVR_WebKit
                         HandleMouseScrollEvent(ovrEvent);
                     break;
                 case EVREventType.VREvent_KeyboardDone:
-                    StringBuilder buffer = new StringBuilder(1024);
-                    OpenVR.Overlay.GetKeyboardText(buffer, 1024);
-                    //SteamVR.instance.overlay.GetKeyboardText(buffer, 1024);
-                    Console.WriteLine("buffer: " + buffer.ToString());
-                    string script = @"var current_inputs = document.getElementsByClassName('current-keyboard-input');
-                          if (current_inputs[0]) {
-                            current_inputs[0].value = '" + buffer.ToString() + @"'
-                            var event = new Event('input', {
-                                'bubbles': true,
-                                'cancelable': true
-                            });
-                            current_inputs[0].dispatchEvent(event);
-                            current_inputs[0].classList.remove('current-keyboard-input');
-                          }
-                         ";
-                    Console.WriteLine(script);
-                    ExecAsyncJS(script);
-                    Console.WriteLine("finished");
+                    HandleKeyboardDoneEvent(ovrEvent);
                     break;
             }
         }
+
+
 
         MouseButtonType GetMouseButtonType(uint button)
         {
@@ -420,6 +384,13 @@ namespace SteamVR_WebKit
                     return MouseButtonType.Middle;
             }
             return MouseButtonType.Left;
+        }
+
+        void HandleKeyboardDoneEvent(VREvent_t ev)
+        {
+            StringBuilder buffer = new StringBuilder(1024);
+            OpenVR.Overlay.GetKeyboardText(buffer, 1024);
+            ExecAsyncJS("handleInputClicked('" + buffer.ToString() + "');");
         }
 
         void HandleMouseMoveEvent(VREvent_t ev)
